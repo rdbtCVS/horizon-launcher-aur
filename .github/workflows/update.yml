@@ -37,6 +37,8 @@ jobs:
         run: runuser -u builder -- bash scripts/validate.sh
       - name: Commit validated update
         run: |
+          # Return the checkout to the Actions user after the unprivileged build.
+          chown -R root:root .
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add PKGBUILD .SRCINFO horizon.svg LICENSE.upstream OFL-Geist.txt
