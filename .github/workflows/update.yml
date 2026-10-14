@@ -79,7 +79,7 @@ jobs:
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   publish:
     needs: maintain
-    if: vars.AUR_PUBLISH_ENABLED == 'true'
+    if: ${{ !cancelled() && needs.maintain.result == 'success' && vars.AUR_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
