@@ -94,15 +94,42 @@ def updated_pkgbuild(text, tag, checksums):
     return text
 
 
+def release_status(text, release):
+    current = re.search(r"^pkgver=(\d+\.\d+\.\d+)$", text, re.M)
+    if not current:
+        raise ValueError("Unsupported PKGBUILD version field")
+    tag = release["tag_name"]
+    if version(tag) < version("launcher-v" + current[1]):
+        raise ValueError("Refusing to downgrade the package")
+    newer = tag != "launcher-v" + current[1]
+    ready = any(asset["name"] == ASSET for asset in release.get("assets", []))
+    return {
+        "current": current[1],
+        "tag": tag,
+        "changed": newer and ready,
+        "status": "update-available" if newer and ready else
+                  "waiting-for-linux-asset" if newer else "up-to-date",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Pin a specific stable launcher tag")
-    parser.add_argument("--refresh", action="store_true", help="Refresh assets/checksums at the current version")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--refresh", action="store_true", help="Refresh assets/checksums at the current version")
+    mode.add_argument("--check", action="store_true", help="Check release metadata without downloading or modifying the package")
     args = parser.parse_args()
     release = find_release(args.tag)
     tag = release["tag_name"]
     pkgbuild = ROOT / "PKGBUILD"
     old_text = pkgbuild.read_text()
+    if args.check:
+        status = release_status(old_text, release)
+        print(json.dumps(status, sort_keys=True))
+        if output := os.environ.get("GITHUB_OUTPUT"):
+            with open(output, "a") as stream:
+                stream.write(f"changed={str(status['changed']).lower()}\ntag={tag}\n")
+        return
     current = re.search(r"^pkgver=(.+)$", old_text, re.M)[1]
     if version(tag) < version("launcher-v" + current):
         raise ValueError("Refusing to downgrade the package")

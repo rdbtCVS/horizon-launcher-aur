@@ -47,6 +47,7 @@ rather than invoking the private executable directly.
 
 ```sh
 python scripts/update.py                  # newest stable launcher-vX.Y.Z
+python scripts/update.py --check          # release metadata only; no package changes
 python scripts/update.py --refresh        # refresh current release and local checksums
 bash scripts/validate.sh                 # requires namcap and desktop-file-utils
 ```
@@ -57,10 +58,18 @@ and pins every source with SHA-256. It updates the upstream MIT licence, Geist
 font licence, icon and `.SRCINFO`. When changing packaging at the same launcher
 version, increment `pkgrel`, then run `--refresh` before committing.
 
-GitHub Actions checks upstream every six hours and on manual dispatch. An update
-must build in a clean Arch container, pass updater tests, validate its desktop
+GitHub Actions checks upstream every 15 minutes and on manual dispatch. This
+lightweight job reads release metadata without downloading binaries, installing
+Arch tools or changing package files. When the launcher version is current,
+the build and publishing jobs are skipped. A newly published release is deferred
+until its Linux archive is available. GitHub may delay scheduled runs.
+
+A new launcher release must build in a clean Arch container, pass updater tests, validate its desktop
 entries and metadata, and pass offline CLI smoke checks before it is committed
-and published. Namcap diagnostics are printed for review. Pull requests run
+and published. Pushes to main still build and validate packaging changes. For
+a manual rebuild or publication retry, enable **force** on the workflow's manual
+dispatch form (`gh workflow run update.yml -f force=true`). Namcap diagnostics
+are printed for review. Pull requests run
 validation with read-only permissions and no AUR credentials.
 
 Publishing uses an independent AUR Git repository. Only `PKGBUILD`, `.SRCINFO`,

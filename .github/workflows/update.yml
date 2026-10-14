@@ -3,15 +3,40 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '23 */6 * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and publish even when the launcher version is current
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
   group: horizon-launcher-aur-maintenance
   cancel-in-progress: false
 jobs:
+  check:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.release.outputs.changed }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Check for a new launcher release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/update.py --check
   maintain:
+    needs: check
+    # Explicit status check allows packaging pushes when the release check is skipped.
+    if: ${{ !cancelled() && (github.event_name == 'push' || (needs.check.result == 'success' && (needs.check.outputs.changed == 'true' || inputs.force == true))) }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     timeout-minutes: 20
@@ -34,7 +59,8 @@ jobs:
         if: github.event_name != 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: runuser -u builder -- python scripts/update.py
+          LAUNCHER_TAG: ${{ needs.check.outputs.tag }}
+        run: runuser -u builder -- python scripts/update.py --tag "$LAUNCHER_TAG"
       - name: Build and validate as an unprivileged user
         run: runuser -u builder -- bash scripts/validate.sh
       - name: Commit validated update

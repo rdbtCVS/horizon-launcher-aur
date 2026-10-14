@@ -1,4 +1,9 @@
 import unittest
+import contextlib
+import io
+import os
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 import update
 
@@ -24,6 +29,41 @@ class UpdateTests(unittest.TestCase):
     def test_missing_linux_asset_fails(self):
         with self.assertRaisesRegex(ValueError, "no horizon-launcher-linux"):
             update.checked_asset(self.release("launcher-v0.2.0", assets=[]))
+
+    def test_release_check_waits_for_linux_asset(self):
+        text = "pkgver=0.2.0\n"
+        release = self.release("launcher-v0.3.0", assets=[])
+        status = update.release_status(text, release)
+        self.assertFalse(status["changed"])
+        self.assertEqual(status["status"], "waiting-for-linux-asset")
+        release["assets"] = [{"name": update.ASSET}]
+        self.assertTrue(update.release_status(text, release)["changed"])
+        with self.assertRaisesRegex(ValueError, "downgrade"):
+            update.release_status(text, self.release("launcher-v0.1.0", assets=[]))
+
+    def test_check_is_read_only_and_emits_workflow_outputs(self):
+        for tag, expected in (("launcher-v0.2.0", False), ("launcher-v0.3.0", True)):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                text = "pkgver=0.2.0\n"
+                (root / "PKGBUILD").write_text(text)
+                output = root / "outputs"
+                release = self.release(tag, assets=[{"name": update.ASSET}])
+                with patch.object(update, "ROOT", root), \
+                     patch.object(update, "find_release", return_value=release), \
+                     patch.object(update, "checked_asset") as download, \
+                     patch.object(update.subprocess, "run") as commands, \
+                     patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
+                     patch("sys.argv", ["update.py", "--check"]), \
+                     contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    update.main()
+                status = update.json.loads(stdout.getvalue())
+                self.assertEqual(status["changed"], expected)
+                self.assertEqual(output.read_text(), f"changed={str(expected).lower()}\ntag={tag}\n")
+                self.assertEqual((root / "PKGBUILD").read_text(), text)
+                self.assertEqual({p.name for p in root.iterdir()}, {"PKGBUILD", "outputs"})
+                download.assert_not_called()
+                commands.assert_not_called()
 
     def test_digest_mismatch_fails(self):
         release = self.release("launcher-v0.2.0", assets=[{
