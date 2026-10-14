@@ -1,0 +1,71 @@
+name: Update and publish AUR package
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: horizon-launcher-aur-maintenance
+  cancel-in-progress: false
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.record.outputs.commit }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - name: Set up clean Arch container
+        run: bash scripts/setup-ci.sh
+      - name: Find newest stable launcher release
+        if: github.event_name != 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: runuser -u builder -- python scripts/update.py
+      - name: Build and validate as an unprivileged user
+        run: runuser -u builder -- bash scripts/validate.sh
+      - name: Commit validated update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PKGBUILD .SRCINFO horizon.svg LICENSE.upstream OFL-Geist.txt
+          if ! git diff --cached --quiet; then
+            version=$(sed -n 's/^pkgver=//p' PKGBUILD)
+            git commit -m "Update launcher package to $version"
+            git push origin HEAD:main
+          fi
+      - id: record
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: maintain
+    if: vars.AUR_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.maintain.outputs.commit }}
+          persist-credentials: false
+      - name: Publish validated package to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file=$(mktemp "$RUNNER_TEMP/aur-key.XXXXXX")
+          trap 'rm -f "$key_file"' EXIT
+          chmod 600 "$key_file"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key_file"
+          unset AUR_SSH_PRIVATE_KEY
+          AUR_SSH_KEY_PATH="$key_file" bash scripts/publish.sh

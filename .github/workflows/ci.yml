@@ -1,0 +1,21 @@
+name: Check package
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up clean Arch container
+        run: bash scripts/setup-ci.sh
+      - name: Build and validate as an unprivileged user
+        run: runuser -u builder -- bash scripts/validate.sh

@@ -1,0 +1,5 @@
+src/
+pkg/
+*.pkg.tar.*
+horizon-launcher-*-linux-x86_64.tar.gz
+__pycache__/
