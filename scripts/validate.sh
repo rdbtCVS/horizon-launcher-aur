@@ -38,4 +38,19 @@ import sys
 from pathlib import Path
 assert json.loads(Path(sys.argv[1]).read_text())["desktop_entry"] is False
 PY
+# 0.2.0 predates the upstream wrapper override. Require the integration on updates.
+if [[ "$pkgver" != 0.2.0 ]]; then
+    export HORIZON_LAUNCHER_DESKTOP_EXEC=/usr/bin/horizon-launcher
+    for attempt in 1 2; do
+        pkg/horizon-launcher-bin/usr/lib/horizon-launcher/horizon-launcher desktop-entry
+        python - "$XDG_DATA_HOME/applications/horizon-launcher.desktop" <<'PY'
+import sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text().splitlines()
+assert 'Exec="/usr/bin/horizon-launcher"' in lines
+assert 'TryExec=/usr/bin/horizon-launcher' in lines
+PY
+        pkg/horizon-launcher-bin/usr/lib/horizon-launcher/horizon-launcher desktop-entry --remove
+    done
+fi
 printf 'Package build, metadata, checksums and offline CLI smoke checks passed.\n'

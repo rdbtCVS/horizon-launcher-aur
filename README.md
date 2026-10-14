@@ -1,9 +1,9 @@
 # Horizon launcher for Arch Linux
 
-Community-maintained AUR packaging by **rdbt**, using the official Linux x86_64
-launcher releases from [ludovic111/horizon](https://github.com/ludovic111/horizon).
-This repository contains the package recipe and automation, not the launcher
-source or binaries. Upstream does not maintain this package.
+Community-maintained AUR package for the official Linux x86_64 launcher releases
+from [ludovic111/horizon](https://github.com/ludovic111/horizon), maintained by
+**rdbt**. This repository contains the package recipe and update automation.
+Upstream does not maintain this package.
 
 ## Install
 
@@ -20,28 +20,31 @@ cd horizon-launcher-bin
 makepkg -si
 ```
 
-Launch **Horizon** from the applications menu, or run `horizon-launcher`.
-The same command provides the CLI and MCP server (`horizon-launcher mcp`).
+Launch **Horizon** from the applications menu or run `horizon-launcher`.
+Use `horizon-launcher --help` for the CLI or `horizon-launcher mcp` for the MCP server.
 
-You need a working Vulkan driver. Preparing game resources needs your own
-Minecraft: Java Edition installation and a **Java 25 JDK** (`jdk25-openjdk`).
-Older Horizon versions may also need Python. A Secret Service provider such as
-GNOME Keyring or KWallet enables persistent Microsoft sign-in; otherwise the
-launcher can retain a session only while it runs. No Minecraft assets are packaged.
+You need a working Vulkan driver. Preparing game resources requires your own
+Minecraft: Java Edition installation and a Java 25 JDK (`jdk25-openjdk`); older
+Horizon versions may also need Python. GNOME Keyring or KWallet can store Microsoft
+sign-in credentials between sessions. No Minecraft assets are included.
 
 ## Package integration
 
-The executable is installed under `/usr/lib/horizon-launcher/`. The command in
-`/usr/bin` sets `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`, so update the launcher through
-your AUR helper. Horizon game downloads and updates still happen in the launcher,
-normally under `~/.local/share/horizon-launcher`.
+Update the launcher through your AUR helper. The `horizon-launcher` command wraps
+the executable in `/usr/lib/horizon-launcher/` and disables launcher self-updates.
+Game downloads and updates remain managed by the launcher, with data normally
+stored in `~/.local/share/horizon-launcher`.
 
-The package owns the system desktop entries and icon. On GUI startup, the wrapper
-uses upstream's `desktop-entry --remove` command to disable its separate per-user
-menu registration. This preserves other launcher settings and prevents a user
-entry from bypassing the wrapper. The launcher's “applications menu” setting
-therefore does not control the package's system menu entry. Use `horizon-launcher`
-rather than invoking the private executable directly.
+The package installs the system menu entries and icon. Opening the GUI through
+the wrapper removes separate per-user entries and disables their automatic
+registration, preserving other settings. The launcher's applications-menu switch
+does not control the package's system entry.
+
+The wrapper sets `HORIZON_LAUNCHER_DESKTOP_EXEC=/usr/bin/horizon-launcher` so newly
+generated menu entries also use the wrapper, including after re-enabling the
+switch in Settings. **Launcher 0.2.0 does not support this override; it requires a
+new upstream release.** After upgrading to a supporting release, run
+`horizon-launcher` once from a terminal to clear older entries that bypassed it.
 
 ## Maintain
 
@@ -52,25 +55,29 @@ python scripts/update.py --refresh        # refresh current release and local ch
 bash scripts/validate.sh                 # requires namcap and desktop-file-utils
 ```
 
-The updater excludes game tags, drafts and prereleases, handles pagination,
-compares the downloaded archive with GitHub's published digest when available,
-and pins every source with SHA-256. It updates the upstream MIT licence, Geist
-font licence, icon and `.SRCINFO`. When changing packaging at the same launcher
-version, increment `pkgrel`, then run `--refresh` before committing.
+The updater selects stable `launcher-vX.Y.Z` releases and refreshes the archive
+checksum, icon, licence notices and `.SRCINFO`. All sources are pinned with
+SHA-256; downloads are also checked against GitHub's published digest when
+available. For packaging changes at the same launcher version, increment
+`pkgrel` and run `--refresh` before committing.
 
-GitHub Actions checks upstream every 15 minutes and on manual dispatch. This
-lightweight job reads release metadata without downloading binaries, installing
-Arch tools or changing package files. When the launcher version is current,
-the build and publishing jobs are skipped. A newly published release is deferred
-until its Linux archive is available. GitHub may delay scheduled runs.
+GitHub Actions checks for updates every 15 minutes and on manual dispatch.
+Scheduled runs skip builds when the package version is current and wait for the
+Linux archive before updating. GitHub may delay scheduled runs.
 
-A new launcher release must build in a clean Arch container, pass updater tests, validate its desktop
-entries and metadata, and pass offline CLI smoke checks before it is committed
-and published. Pushes to main still build and validate packaging changes. For
-a manual rebuild or publication retry, enable **force** on the workflow's manual
-dispatch form (`gh workflow run update.yml -f force=true`). Namcap diagnostics
-are printed for review. Pull requests run
-validation with read-only permissions and no AUR credentials.
+Updates and pushes to `main` build in an Arch container, run the updater and
+wrapper tests, validate desktop entries and metadata, check namcap diagnostics,
+and run offline CLI smoke checks before publishing. Pull requests validate with
+read-only permissions and no AUR credentials.
+
+For a manual rebuild or publication retry, enable **force** on the workflow's
+dispatch form or run:
+
+```sh
+gh workflow run update.yml -f force=true
+```
+
+## Publishing
 
 Publishing uses an independent AUR Git repository. Only `PKGBUILD`, `.SRCINFO`,
 the wrapper, desktop entries, icon and licence notices are copied there.
