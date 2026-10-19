@@ -1,6 +1,6 @@
 # Maintainer: rdbt <87152661+rdbtCVS@users.noreply.github.com>
 pkgname=horizon-launcher-bin
-pkgver=0.14.0
+pkgver=0.16.0
 pkgrel=1
 pkgdesc='Horizon is Minecraft Java Edition rewritten in Rust'
 arch=('x86_64')
@@ -26,7 +26,7 @@ source=("horizon-launcher-${pkgver}-linux-x86_64.tar.gz::${url}/releases/downloa
         'OFL-Geist.txt'
         'LICENSE')
 sha256sums=(
-    'f931fe350a8b0b936fcd595b9f151448eab2722e078f110027591b2a36a1c6bb'
+    '3120b51ab039296e483b68049cad875d5e3b4e7cf6d9f3459542fe9a9d181670'
     '7f92a543eba884aa862eca36639790437f2d1bc41ae2d24b0556dd6aa2cc3287'
     'fb11867fdefb560a12d0edd06555ded73c520e7e72cf6f3959a074a4a13d3c90'
     '2eb5834d6d0b1189bef3f3f73139ca2fee7f5c837a4aaeb0df744005303b6a54'
