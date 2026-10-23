@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import quote
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,16 +26,39 @@ UPSTREAM_FILES = {
 
 
 def version(tag):
-    match = re.fullmatch(r"launcher-v(\d+)\.(\d+)\.(\d+)", tag)
+    match = re.fullmatch(r"launcher(?:-v|@)(\d+)\.(\d+)\.(\d+)", tag)
     return tuple(map(int, match.groups())) if match else None
+
+
+def release_key(tag):
+    parsed = version(tag)
+    if parsed is None:
+        raise ValueError("Use a stable tag such as launcher@0.2.1 or launcher-v0.17.0")
+    # Upstream reset 0.17.0 to 0.2.0 when switching to launcher@ tags.
+    return (1 if tag.startswith("launcher@") else 0, parsed)
+
+
+def package_key(text):
+    current = re.search(r"^pkgver=(\d+\.\d+\.\d+)$", text, re.M)
+    if not current:
+        raise ValueError("Unsupported PKGBUILD version field")
+    epoch = re.search(r"^epoch=(\d+)$", text, re.M)
+    return (int(epoch[1]) if epoch else 0, tuple(map(int, current[1].split("."))))
+
+
+def is_newer(text, tag):
+    incoming, current = release_key(tag), package_key(text)
+    if incoming < current:
+        raise ValueError("Refusing to downgrade the package")
+    return incoming > current
 
 
 def newest_release(releases):
     stable = [r for r in releases if version(r["tag_name"]) is not None
               and not r.get("draft") and not r.get("prerelease")]
     if not stable:
-        raise ValueError("No stable launcher-vX.Y.Z release found")
-    return max(stable, key=lambda r: version(r["tag_name"]))
+        raise ValueError("No stable launcher@X.Y.Z or launcher-vX.Y.Z release found")
+    return max(stable, key=lambda r: release_key(r["tag_name"]))
 
 
 def fetch(url):
@@ -50,9 +74,8 @@ def fetch(url):
 def find_release(tag=None):
     base = f"https://api.github.com/repos/{UPSTREAM}/releases"
     if tag:
-        if version(tag) is None:
-            raise ValueError("Use a stable tag such as launcher-v0.2.0")
-        release = json.loads(fetch(f"{base}/tags/{tag}"))
+        release_key(tag)
+        release = json.loads(fetch(f"{base}/tags/{quote(tag, safe='')}"))
         return newest_release([release])
     releases = []
     for page in range(1, 51):
@@ -67,7 +90,7 @@ def checked_asset(release):
     asset = next((a for a in release["assets"] if a["name"] == ASSET), None)
     if asset is None:
         raise ValueError(f"{release['tag_name']} has no {ASSET}; publication may still be in progress")
-    expected_url = f"https://github.com/{UPSTREAM}/releases/download/{release['tag_name']}/{ASSET}"
+    expected_url = f"https://github.com/{UPSTREAM}/releases/download/{quote(release['tag_name'], safe='')}/{ASSET}"
     if asset["browser_download_url"] != expected_url:
         raise ValueError("Unexpected release download URL")
     data = fetch(expected_url)
@@ -79,14 +102,19 @@ def checked_asset(release):
 
 
 def updated_pkgbuild(text, tag, checksums):
-    current = re.search(r"^pkgver=(\d+\.\d+\.\d+)$", text, re.M)
-    if not current:
-        raise ValueError("Unsupported PKGBUILD version field")
-    if version(tag) < version("launcher-v" + current[1]):
-        raise ValueError("Refusing to downgrade the package")
-    if tag != "launcher-v" + current[1]:
-        text = re.sub(r"^pkgver=.*$", f"pkgver={tag.removeprefix('launcher-v')}", text, flags=re.M)
+    if is_newer(text, tag):
+        text = re.sub(r"^pkgver=.*$", f"pkgver={'.'.join(map(str, version(tag)))}", text, flags=re.M)
         text = re.sub(r"^pkgrel=.*$", "pkgrel=1", text, flags=re.M)
+    if release_key(tag)[0] == 1:
+        if re.search(r"^epoch=", text, re.M):
+            text = re.sub(r"^epoch=.*$", "epoch=1", text, flags=re.M)
+        else:
+            text = re.sub(r"^pkgver=", "epoch=1\npkgver=", text, flags=re.M)
+    if re.search(r"^_tag=", text, re.M):
+        text = re.sub(r"^_tag=.*$", f"_tag={tag}", text, flags=re.M)
+    else:
+        text = re.sub(r"^(pkgrel=.*)$", rf"\1\n_tag={tag}", text, flags=re.M)
+    text = text.replace("releases/download/launcher-v${pkgver}/", "releases/download/${_tag}/")
     sums = "sha256sums=(\n" + "".join(f"    '{s}'\n" for s in checksums) + ")"
     text, count = re.subn(r"^sha256sums=\(.*?^\)", sums, text, flags=re.M | re.S)
     if count != 1:
@@ -95,16 +123,11 @@ def updated_pkgbuild(text, tag, checksums):
 
 
 def release_status(text, release):
-    current = re.search(r"^pkgver=(\d+\.\d+\.\d+)$", text, re.M)
-    if not current:
-        raise ValueError("Unsupported PKGBUILD version field")
     tag = release["tag_name"]
-    if version(tag) < version("launcher-v" + current[1]):
-        raise ValueError("Refusing to downgrade the package")
-    newer = tag != "launcher-v" + current[1]
+    newer = is_newer(text, tag)
     ready = any(asset["name"] == ASSET for asset in release.get("assets", []))
     return {
-        "current": current[1],
+        "current": ".".join(map(str, package_key(text)[1])),
         "tag": tag,
         "changed": newer and ready,
         "status": "update-available" if newer and ready else
@@ -130,10 +153,7 @@ def main():
             with open(output, "a") as stream:
                 stream.write(f"changed={str(status['changed']).lower()}\ntag={tag}\n")
         return
-    current = re.search(r"^pkgver=(.+)$", old_text, re.M)[1]
-    if version(tag) < version("launcher-v" + current):
-        raise ValueError("Refusing to downgrade the package")
-    if tag == "launcher-v" + current and not args.refresh:
+    if not is_newer(old_text, tag) and not args.refresh:
         print(f"Already tracking {tag}")
         return
     archive, digest = checked_asset(release)
@@ -151,7 +171,8 @@ def main():
     with tempfile.NamedTemporaryFile(dir=ROOT, delete=False) as temp:
         temp.write(archive)
         archive_temp = Path(temp.name)
-    archive_temp.replace(ROOT / f"horizon-launcher-{tag.removeprefix('launcher-v')}-linux-x86_64.tar.gz")
+    archive_version = ".".join(map(str, version(tag)))
+    archive_temp.replace(ROOT / f"horizon-launcher-{archive_version}-linux-x86_64.tar.gz")
     result = subprocess.run(["makepkg", "--printsrcinfo"], cwd=ROOT, check=True, capture_output=True, text=True)
     (ROOT / ".SRCINFO").write_text(result.stdout)
     print(f"Pinned {tag}, SHA-256 {digest}")

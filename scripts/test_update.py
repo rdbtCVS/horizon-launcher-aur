@@ -19,6 +19,53 @@ class UpdateTests(unittest.TestCase):
                     self.release("launcher-v3.0.0", prerelease=True)]
         self.assertEqual(update.newest_release(releases)["tag_name"], "launcher-v0.10.0")
 
+    def test_reset_series_supersedes_legacy_versions(self):
+        releases = [self.release("launcher-v0.17.0"), self.release("launcher@0.2.0"),
+                    self.release("launcher@0.2.1"), self.release("launcher@0.2.10"),
+                    self.release("launcher@0.2.9"), self.release("v0.3.0"),
+                    self.release("launcher@1.0.0-rc1"),
+                    self.release("launcher@2.0.0", draft=True),
+                    self.release("launcher@3.0.0", prerelease=True)]
+        self.assertEqual(update.newest_release(releases)["tag_name"], "launcher@0.2.10")
+
+    def test_explicit_new_tag(self):
+        release = self.release("launcher@0.2.1", assets=[])
+        with patch.object(update, "fetch", return_value=update.json.dumps(release)) as fetch:
+            self.assertEqual(update.find_release("launcher@0.2.1"), release)
+            self.assertTrue(fetch.call_args.args[0].endswith("/tags/launcher%400.2.1"))
+        for tag in ("v0.2.1", "launcher@0.2.1-rc1"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "stable tag"):
+                update.find_release(tag)
+
+    def test_reset_status_and_downgrade_protection(self):
+        release = self.release("launcher@0.2.1", assets=[{"name": update.ASSET}])
+        self.assertTrue(update.release_status("pkgver=0.17.0\n", release)["changed"])
+        text = "epoch=1\npkgver=0.2.1\n"
+        self.assertEqual(update.release_status(text, release)["status"], "up-to-date")
+        release["tag_name"] = "launcher@0.2.2"
+        self.assertTrue(update.release_status(text, release)["changed"])
+        for tag in ("launcher@0.2.0", "launcher-v0.17.0", "launcher-v9.0.0"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "downgrade"):
+                update.release_status(text, self.release(tag, assets=[]))
+        release["assets"] = []
+        self.assertEqual(update.release_status(text, release)["status"], "waiting-for-linux-asset")
+
+    def test_reset_updates_epoch_source_and_pkgrel(self):
+        text = ('pkgver=0.17.0\npkgrel=3\n'
+                'source=("archive::https://github.com/repo/releases/download/launcher-v${pkgver}/archive")\n'
+                "sha256sums=(\n    'old'\n)\n")
+        updated = update.updated_pkgbuild(text, "launcher@0.2.1", ["new"])
+        self.assertIn("epoch=1\npkgver=0.2.1\npkgrel=1\n_tag=launcher@0.2.1\n", updated)
+        self.assertIn("/releases/download/${_tag}/", updated)
+        self.assertEqual(update.updated_pkgbuild(updated, "launcher@0.2.1", ["new"]), updated)
+        next_version = update.updated_pkgbuild(updated.replace("pkgrel=1", "pkgrel=3"), "launcher@0.2.2", ["next"])
+        self.assertEqual(next_version.count("epoch=1\n"), 1)
+        self.assertEqual(next_version.count("_tag="), 1)
+        self.assertIn("pkgver=0.2.2\npkgrel=1\n_tag=launcher@0.2.2\n", next_version)
+        self.assertIn("pkgrel=3", update.updated_pkgbuild(updated.replace("pkgrel=1", "pkgrel=3"), "launcher@0.2.1", ["new"]))
+        with self.assertRaisesRegex(ValueError, "downgrade"):
+            update.updated_pkgbuild(updated, "launcher-v0.17.0", ["old"])
+
     def test_catalog_pagination(self):
         first_page = [self.release("v2026.10.14")] * 100
         second_page = [self.release("launcher-v0.2.0", assets=[])]
@@ -29,6 +76,20 @@ class UpdateTests(unittest.TestCase):
     def test_missing_linux_asset_fails(self):
         with self.assertRaisesRegex(ValueError, "no horizon-launcher-linux"):
             update.checked_asset(self.release("launcher-v0.2.0", assets=[]))
+
+    def test_new_tag_asset_uses_encoded_download_url(self):
+        data = b"launcher archive"
+        url = f"https://github.com/{update.UPSTREAM}/releases/download/launcher%400.2.1/{update.ASSET}"
+        digest = update.hashlib.sha256(data).hexdigest()
+        release = self.release("launcher@0.2.1", assets=[{
+            "name": update.ASSET, "browser_download_url": url, "digest": f"sha256:{digest}",
+        }])
+        with patch.object(update, "fetch", return_value=data) as fetch:
+            self.assertEqual(update.checked_asset(release), (data, digest))
+            fetch.assert_called_once_with(url)
+        release["assets"][0]["browser_download_url"] = "https://example.org/archive"
+        with self.assertRaisesRegex(ValueError, "Unexpected release download URL"):
+            update.checked_asset(release)
 
     def test_release_check_waits_for_linux_asset(self):
         text = "pkgver=0.2.0\n"
@@ -42,7 +103,7 @@ class UpdateTests(unittest.TestCase):
             update.release_status(text, self.release("launcher-v0.1.0", assets=[]))
 
     def test_check_is_read_only_and_emits_workflow_outputs(self):
-        for tag, expected in (("launcher-v0.2.0", False), ("launcher-v0.3.0", True)):
+        for tag, expected in (("launcher-v0.2.0", False), ("launcher-v0.3.0", True), ("launcher@0.2.1", True)):
             with self.subTest(tag=tag), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 text = "pkgver=0.2.0\n"
