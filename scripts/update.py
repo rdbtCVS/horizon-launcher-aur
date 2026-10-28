@@ -12,7 +12,7 @@ from urllib.parse import quote
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
-UPSTREAM = "ludovic111/horizon"
+UPSTREAM = "horizon-rust/horizon"
 ASSET = "horizon-launcher-linux-x86_64.tar.gz"
 LOCAL_SOURCES = (
     "horizon-launcher.sh", "horizon-launcher.desktop", "horizon.desktop",

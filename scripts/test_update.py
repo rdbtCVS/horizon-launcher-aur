@@ -32,7 +32,8 @@ class UpdateTests(unittest.TestCase):
         release = self.release("launcher@0.2.1", assets=[])
         with patch.object(update, "fetch", return_value=update.json.dumps(release)) as fetch:
             self.assertEqual(update.find_release("launcher@0.2.1"), release)
-            self.assertTrue(fetch.call_args.args[0].endswith("/tags/launcher%400.2.1"))
+            fetch.assert_called_once_with(
+                "https://api.github.com/repos/horizon-rust/horizon/releases/tags/launcher%400.2.1")
         for tag in ("v0.2.1", "launcher@0.2.1-rc1"):
             with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "stable tag"):
                 update.find_release(tag)
@@ -79,7 +80,8 @@ class UpdateTests(unittest.TestCase):
 
     def test_new_tag_asset_uses_encoded_download_url(self):
         data = b"launcher archive"
-        url = f"https://github.com/{update.UPSTREAM}/releases/download/launcher%400.2.1/{update.ASSET}"
+        # GitHub returns the canonical owner after the upstream repository move.
+        url = "https://github.com/horizon-rust/horizon/releases/download/launcher%400.2.1/horizon-launcher-linux-x86_64.tar.gz"
         digest = update.hashlib.sha256(data).hexdigest()
         release = self.release("launcher@0.2.1", assets=[{
             "name": update.ASSET, "browser_download_url": url, "digest": f"sha256:{digest}",

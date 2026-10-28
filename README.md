@@ -1,6 +1,6 @@
 # Horizon launcher for Arch Linux
 
-Community AUR package for [Horizon](https://github.com/ludovic111/horizon).
+Community AUR package for [Horizon](https://github.com/horizon-rust/horizon).
 
 ```sh
 paru -S horizon-launcher-bin
