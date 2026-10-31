@@ -1,0 +1,42 @@
+name: Watch for launcher releases
+# GitHub runs update.yml's 15-minute schedule only every few hours, so this
+# polls upstream and starts update.yml within a minute of a release. Each watch
+# starts the next one; the schedule only restarts the chain after a failure.
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/watch.yml, scripts/watch.py, scripts/update.py]
+  schedule:
+    - cron: '43 */2 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: horizon-launcher-release-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Start update.yml when a launcher release is ready
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/watch.py --minutes 340
+      - name: Start the next watch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A watch already waiting behind this one (schedule or push) takes over.
+          waiting=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watch.yml --limit 20 \
+            --json databaseId,status --jq "[.[] | select(.status != \"completed\" and .databaseId != $GITHUB_RUN_ID)] | length")
+          if [ "$waiting" -eq 0 ]; then
+            gh workflow run watch.yml --repo "$GITHUB_REPOSITORY" --ref main
+          fi

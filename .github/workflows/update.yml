@@ -2,6 +2,7 @@ name: Update and publish AUR package
 on:
   push:
     branches: [main]
+  # GitHub fires this every few hours at best; watch.yml starts runs on release.
   schedule:
     - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
